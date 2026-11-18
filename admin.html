@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Машинка — админ</title>
+<style>
+:root{--bg:#f4f5f8;--card:#fff;--ink:#1d1f2b;--mute:#6b7083;--line:#e2e4ec;--acc:#ff8a1f;--ok:#1e9e5a;--bad:#d4343f;--chip:#eef0f6}
+@media (prefers-color-scheme:dark){:root{--bg:#14151c;--card:#1d1f2a;--ink:#eceef6;--mute:#9aa0b5;--line:#2c2f3d;--chip:#262938}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:2}
+header b{font-size:17px}header .sp{flex:1}
+main{max-width:1180px;margin:0 auto;padding:16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:16px}
+@media (max-width:860px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;min-width:0}
+h2{font-size:15px;margin:0 0 10px}
+input,select,textarea,button{font:inherit;color:inherit}
+input,select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
+textarea{font:12.5px/1.45 ui-monospace,Consolas,monospace;min-height:340px;resize:vertical}
+button{border:0;border-radius:10px;padding:8px 12px;background:var(--chip);cursor:pointer;white-space:nowrap}
+button.pri{background:var(--acc);color:#fff;font-weight:700}button.bad{background:var(--bad);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:7px 6px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--mute);font-weight:600;font-size:12px}
+tr.row{cursor:pointer}tr.row:hover td{background:var(--chip)}tr.sel td{background:var(--chip)}
+.mute{color:var(--mute);font-size:13px}
+.chip{display:inline-block;padding:1px 8px;border-radius:99px;background:var(--chip);font-size:12px}
+.chip.tester{background:#7c4dff;color:#fff}.chip.admin{background:var(--acc);color:#fff}
+.row2{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.row2 input{width:120px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:8px 0 12px}
+.stats div{background:var(--bg);border-radius:10px;padding:8px}.stats b{display:block;font-size:18px}
+#msg{min-height:20px;font-size:13px}#msg.ok{color:var(--ok)}#msg.bad{color:var(--bad)}
+.tabs button.on{background:var(--ink);color:var(--card)}
+#login{max-width:420px;margin:60px auto}
+.hidden{display:none!important}
+.rep{border-bottom:1px solid var(--line);padding:8px 0;font-size:14px;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<div id="login" class="card">
+  <h2>Вход в панель</h2>
+  <p class="mute">Пароль — значение ADMIN_TOKEN из файла .env.</p>
+  <input id="tok" type="password" placeholder="ADMIN_TOKEN" autocomplete="off">
+  <div class="row2"><button class="pri" id="go">Войти</button><span id="lmsg" class="mute"></span></div>
+</div>
+<div id="app" class="hidden">
+  <header><b>Машинка в городе · админ</b><span class="sp"></span>
+    <span class="tabs"><button data-tab="players" class="on">Игроки</button> <button data-tab="reports">Отчёты тестеров</button></span>
+    <button id="out">Выйти</button></header>
+  <main id="pPlayers">
+    <section class="card">
+      <div class="row2"><input id="q" placeholder="Поиск: имя, @ник, id" style="flex:1;width:auto"><button id="reload">Обновить</button></div>
+      <table><thead><tr><th>Игрок</th><th>★</th><th>◉</th><th>Роль</th><th>Был</th></tr></thead><tbody id="list"></tbody></table>
+      <p class="mute" id="cnt"></p>
+    </section>
+    <section class="card" id="detail"><p class="mute">Выбери игрока слева.</p></section>
+  </main>
+  <main id="pReports" class="hidden" style="grid-template-columns:1fr"><section class="card"><h2>Отчёты тестеров</h2><div id="reps"></div></section></main>
+</div>
+<script>window.GVD_API="https://crgsuktubtvxspmlthxz.supabase.co/functions/v1/machinka";</script>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let token = '';
+  try { token = sessionStorage.getItem('gvd_admin') || ''; } catch {}
+  let players = [], cur = null;
+  const api = async (path, method = 'GET', body) => {
+    // на GitHub Pages адрес сервера вписывает npm run deploy (window.GVD_API); на локальном сервере панель — по адресу /admin
+    const base = String(window.GVD_API || location.pathname.replace(/\/admin\/?$/, '')).replace(/\/+$/, '');
+    const r = await fetch(base + '/admin/api/' + path, { method, headers: { 'x-admin-token': token, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) { logout(); throw new Error('Неверный токен'); }
+    if (!r.ok) throw new Error(j.error || r.status);
+    return j;
+  };
+  const when = (t) => t ? new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+  function logout() { token = ''; try { sessionStorage.removeItem('gvd_admin'); } catch {} $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
+  async function login() {
+    token = $('#tok').value.trim() || token;
+    try { await load(); try { sessionStorage.setItem('gvd_admin', token); } catch {} $('#login').classList.add('hidden'); $('#app').classList.remove('hidden'); }
+    catch (e) { $('#lmsg').textContent = e.message; }
+  }
+  async function load() { players = await api('players'); draw(); }
+  function draw() {
+    const q = $('#q').value.trim().toLowerCase();
+    const list = players.filter((p) => !q || String(p.id).includes(q) || (p.name || '').toLowerCase().includes(q) || ('@' + (p.username || '')).toLowerCase().includes(q));
+    $('#list').innerHTML = list.map((p) => `<tr class="row ${cur && cur.id === p.id ? 'sel' : ''}" data-id="${p.id}"><td>${esc(p.name || '—')}<div class="mute">${p.username ? '@' + esc(p.username) + ' · ' : ''}${p.id}</div></td><td>${p.stars}</td><td>${p.coins}</td><td><span class="chip ${p.role}">${p.role}</span></td><td class="mute">${when(p.lastSeen)}</td></tr>`).join('');
+    $('#cnt').textContent = `Игроков: ${players.length}` + (q ? ` · найдено ${list.length}` : '');
+  }
+  async function open(id) { cur = await api('player/' + id); draw(); detail(); }
+  function msg(t, ok) { const m = $('#msg'); if (m) { m.textContent = t; m.className = ok ? 'ok' : 'bad'; } }
+  function detail() {
+    const p = cur;
+    $('#detail').innerHTML = `
+      <h2>${esc(p.name || '—')} ${p.username ? '<span class="mute">@' + esc(p.username) + '</span>' : ''} <span class="chip ${p.role}">${p.role}</span></h2>
+      <div class="mute">id ${p.id} · первый вход ${when(p.firstSeen)} · последний ${when(p.lastSeen)} · правок админа: ${p.arev}</div>
+      <div class="stats"><div>Звёзды<b>${p.stars}</b></div><div>Монеты<b>${p.coins}</b></div><div>Миссии<b>${p.missions.length}/4</b></div><div>Заезды<b>${p.runs}</b></div></div>
+      <div class="mute">Машины: ${esc(p.cars.join(', '))} (выбрана: ${esc(p.car)})</div>
+      <div class="row2"><input id="coins" type="number" min="0" value="${p.coins}"><button data-a="setCoins">Задать монеты</button><button data-a="addCoins">Добавить</button></div>
+      <div class="row2"><button data-a="allCars">Открыть все машины</button>
+        <select id="role" style="width:auto">${['player', 'tester', 'admin'].map((r) => `<option ${p.role === r ? 'selected' : ''}>${r}</option>`).join('')}</select><button id="setRole">Сменить роль</button>
+        <button class="bad" data-a="reset">Сбросить прогресс</button></div>
+      <h2 style="margin-top:14px">Сохранение (JSON)</h2>
+      <p class="mute">Любое поле можно поправить вручную. После сохранения игрок получит эту версию при следующем входе — она важнее копии на телефоне.</p>
+      <textarea id="json" spellcheck="false">${esc(JSON.stringify(p.save, null, 2))}</textarea>
+      <div class="row2"><button class="pri" id="saveJson">Сохранить JSON</button><span id="msg"></span></div>`;
+  }
+  $('#go').onclick = login;
+  $('#tok').onkeydown = (e) => { if (e.key === 'Enter') login(); };
+  $('#out').onclick = logout;
+  $('#reload').onclick = () => load().catch((e) => alert(e.message));
+  $('#q').oninput = draw;
+  $('#list').onclick = (e) => { const tr = e.target.closest('tr[data-id]'); if (tr) open(tr.dataset.id).catch((x) => alert(x.message)); };
+  document.querySelectorAll('[data-tab]').forEach((b) => b.onclick = async () => {
+    document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('on', x === b));
+    const rep = b.dataset.tab === 'reports';
+    $('#pPlayers').classList.toggle('hidden', rep); $('#pReports').classList.toggle('hidden', !rep);
+    if (rep) { const r = await api('reports'); $('#reps').innerHTML = r.map((x) => `<div class="rep"><b>${esc(x.name)}</b> ${x.username ? '@' + esc(x.username) : ''} <span class="mute">${x.id} · ${when(x.t)}</span><div>${esc(x.text)}</div><div class="mute">${esc(JSON.stringify(x.info))}</div></div>`).join('') || '<p class="mute">Отчётов нет.</p>'; }
+  });
+  $('#detail').onclick = async (e) => {
+    const b = e.target.closest('button');
+    if (!b || !cur) return;
+    try {
+      if (b.dataset.a) {
+        if (b.dataset.a === 'reset' && !confirm('Сбросить весь прогресс игрока?')) return;
+        cur = await api(`player/${cur.id}/action`, 'POST', { action: b.dataset.a, value: +$('#coins').value || 0 });
+      } else if (b.id === 'setRole') cur = await api(`player/${cur.id}/role`, 'POST', { role: $('#role').value });
+      else if (b.id === 'saveJson') {
+        let save; try { save = JSON.parse($('#json').value); } catch (x) { msg('Ошибка в JSON: ' + x.message); return; }
+        cur = await api(`player/${cur.id}/save`, 'PUT', { save });
+      } else return;
+      await load(); detail(); msg('Сохранено ✓', true);
+    } catch (x) { msg(x.message); }
+  };
+  if (token) login();
+})();
+</script>
+</body>
+</html>
